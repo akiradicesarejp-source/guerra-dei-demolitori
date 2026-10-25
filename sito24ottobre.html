@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Guerra ai demolitori!</title>
+    <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+    <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+    <style>
+        html, body { margin: 0; height: 100%; font-family: Georgia, serif; }
+        #map { position: absolute; inset: 0; }
+        #titolo {
+            position: absolute; top: 14px; left: 14px; z-index: 2; pointer-events: none;
+            background: rgba(255,253,248,.92); padding: 10px 16px; border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,.2);
+            font-size: 22px; font-weight: bold; color: #2b2b2b;
+        }
+        #titolo small { display: block; font-size: 12px; font-weight: normal; font-style: italic; color: #666; }
+        #scheda {
+            position: absolute; bottom: 24px; left: 14px; width: 310px; z-index: 2;
+            background: #fffdf8; padding: 14px 18px; border-radius: 6px;
+            box-shadow: 0 2px 12px rgba(0,0,0,.25); display: none;
+        }
+        #scheda h2 { margin: 0 0 8px; font-size: 18px; }
+        #scheda .hugo { font-style: italic; border-left: 3px solid #c0392b; padding-left: 10px; }
+        #scheda .esito { color: #444; font-size: 14px; }
+        #scheda button { padding: 6px 10px; cursor: pointer; }
+        .maplibregl-popup-content {
+            font-family: Georgia, serif; font-size: 13px; padding: 10px 12px; max-width: 240px;
+            background: #fffdf8; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+        }
+        .maplibregl-popup-content b { display: block; margin-bottom: 4px; }
+        .maplibregl-popup-content i { color: #555; }
+
+        /* ---------- SCENA DI DEMOLIZIONE ---------- */
+        #scena {
+            position: fixed; inset: 0; z-index: 10; display: none;
+            background: rgba(20,16,12,.72); align-items: center; justify-content: center;
+        }
+        #scena.aperta { display: flex; }
+        #pannello {
+            background: #fffdf8; border-radius: 8px; padding: 18px 22px; width: min(460px, 92vw);
+            max-height: 96vh; overflow: auto; box-shadow: 0 6px 30px rgba(0,0,0,.5); position: relative;
+        }
+        #pannello h2 { margin: 0 28px 6px 0; font-size: 19px; }
+        #pannello .hugo { font-style: italic; border-left: 3px solid #c0392b; padding-left: 10px; margin: 6px 0 12px; font-size: 14px; }
+        #x { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 26px; cursor: pointer; color: #666; }
+
+        #stage {
+            position: relative; width: 100%; aspect-ratio: 4 / 5; overflow: hidden;
+            border-radius: 4px; background: #cfd8dc;
+        }
+        #oggi, #integra, .pezzo { position: absolute; }
+        #oggi { inset: 0; background-size: 100% 100%; }
+        #integra { inset: 0; background-size: 100% 100%; }
+        #integra.trema { animation: trema .45s linear; }
+        @keyframes trema {
+            0%,100% { transform: translate(0,0); }
+            15% { transform: translate(-6px, 1px) rotate(-.4deg); }
+            30% { transform: translate(6px, -1px) rotate(.4deg); }
+            45% { transform: translate(-5px, 0); }
+            60% { transform: translate(5px, 1px); }
+            80% { transform: translate(-2px, 0); }
+        }
+        .pezzo { will-change: transform, opacity; }
+
+        #messaggio { min-height: 2.6em; margin: 10px 0 8px; font-size: 15px; font-style: italic; color: #333; }
+        #strumenti { display: flex; flex-wrap: wrap; gap: 6px; }
+        #strumenti button {
+            padding: 8px 10px; cursor: pointer; border: 1px solid #b9ad98; background: #f4ecdc;
+            border-radius: 5px; font-family: inherit; font-size: 14px;
+        }
+        #strumenti button:hover:not(:disabled) { background: #ebdfc6; }
+        #strumenti button:disabled { opacity: .45; cursor: default; }
+        #strumenti button.penna { border-color: #c0392b; background: #fbe9e6; font-weight: bold; }
+        #finale { display: none; margin-top: 12px; font-size: 14px; color: #444; border-top: 1px solid #ddd; padding-top: 10px; }
+        #finale button { margin-top: 6px; padding: 6px 10px; cursor: pointer; }
+        #scheda { max-height: 85vh; overflow: auto; }
+        #scheda .foto { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 4px; display: block; margin-bottom: 8px; }
+        #scheda .foto.vuota { background: #e6e0d2; color: #8a8170; display: flex; align-items: center; justify-content: center; font-size: 13px; font-style: italic; }
+        #scheda .credito { font-size: 11px; color: #777; margin: -4px 0 8px; }
+        .pulsa { box-shadow: 0 0 0 3px #d4a017, 0 0 8px rgba(0,0,0,.6); animation: pulsa 1.8s infinite; }
+        @keyframes pulsa { 0% { box-shadow: 0 0 0 3px #d4a017, 0 0 0 3px rgba(212,160,23,.7); }
+            70% { box-shadow: 0 0 0 3px #d4a017, 0 0 0 16px rgba(212,160,23,0); }
+            100% { box-shadow: 0 0 0 3px #d4a017, 0 0 0 3px rgba(212,160,23,0); } }
+
+        #riuso { position: fixed; inset: 0; z-index: 10; display: none; background: rgba(20,16,12,.72); align-items: center; justify-content: center; }
+        #riuso.aperto { display: flex; }
+        #r-pannello { background: #fffdf8; border-radius: 8px; padding: 18px 22px; width: min(560px, 94vw); max-height: 96vh; overflow: auto; position: relative; box-shadow: 0 6px 30px rgba(0,0,0,.5); }
+        #r-pannello h2 { margin: 0 28px 6px 0; font-size: 19px; }
+        #r-x { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 26px; cursor: pointer; color: #666; }
+        .r-carta { display: flex; min-height: 120px; border: 1px solid #d8cdb6; border-radius: 6px; margin: 10px 0; overflow: hidden; cursor: pointer; background: #fff; }
+        .r-img { position: relative; width: 36%; flex: none; }
+        .r-faccia { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 46px; background-size: cover; background-position: center; transition: opacity .7s, filter .7s; }
+        .r-opera { background-color: #efe3c4; }
+        .r-uso { background-color: #b9b0a0; opacity: 0; filter: grayscale(.6); }
+        .r-carta.fatta .r-opera { opacity: 0; }
+        .r-carta.fatta .r-uso { opacity: 1; }
+        .r-testo { padding: 10px 14px; font-size: 14px; }
+        .r-stato { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #8a7a55; }
+        .r-carta.fatta .r-stato { color: #c0392b; }
+        .r-nome { font-weight: bold; margin: 2px 0 4px; }
+        .r-testo .dopo, .r-carta.fatta .prima { display: none; }
+        .r-carta.fatta .dopo { display: block; color: #c0392b; }
+        .r-hint { margin-top: 6px; font-size: 12px; color: #888; font-style: italic; }
+        .r-carta.fatta .r-hint { display: none; }
+        #r-finale { display: none; border-top: 1px solid #ddd; margin-top: 12px; padding-top: 10px; font-size: 15px; font-style: italic; }
+    </style>
+</head>
+<body>
+<div id="titolo">Guerra ai demolitori!<small>Victor Hugo, 1825 e 1832</small></div>
+<div id="map"></div>
+<div id="scheda"></div>
+
+<div id="scena">
+    <div id="pannello">
+        <button id="x" title="Chiudi">×</button>
+        <h2 id="s-nome"></h2>
+        <p class="hugo" id="s-hugo"></p>
+        <div id="stage">
+            <div id="oggi"></div>
+            <div id="integra"></div>
+        </div>
+        <div id="messaggio"></div>
+        <div id="strumenti"></div>
+        <div id="finale"></div>
+    </div>
+</div>
+
+<script>
+    /* =========================================================
+       1. DATI. Un monumento con "scena" apre la demolizione;
+          senza "scena" apre solo la scheda.
+       ========================================================= */
+    const monumenti = [
+        { id: "laon", nome: "Torre di Louis d'Outremer, Laon", coord: [3.6240, 49.5640],
+            hugo: "Una penna d'oca ha fatto ciò che arieti e cannoni non avevano fatto.",
+            esito: "Demolita nel 1832 dopo il voto del consiglio municipale.",
+            scena: {
+                immagine:"immagini/laon.jpg",
+                oggi: "immagini/laon1.jpg",
+                strumenti: [
+                    { icona: "🐏", nome: "Ariete",         risposta: "L'ariete batte e ribatte. La torre non si muove." },
+                    { icona: "🪨", nome: "Catapulta",      risposta: "Le pietre rimbalzano sulle mura. Niente." },
+                    { icona: "💥", nome: "Cannone",        risposta: "Il cannone tuona, e la torre resta in piedi." },
+                    { icona: "🌪️", nome: "Uragano",        risposta: "L'uragano passa. La torre è ancora lì." },
+                    { icona: "⚡", nome: "Fuoco del cielo", risposta: "Il fulmine cade sulla torre. Nemmeno una crepa." },
+                    { icona: "🪶", nome: "Penna d'oca",    abbatte: true,
+                        risposta: "Il consiglio municipale vota il decreto. Una firma, e la torre crolla." }
+                ],
+                finale: "Il consiglio votò: «monumento feudale». Chi difendeva la torre fu accusato di carlismo."
+            } },
+        { id: "saint-jacques", nome: "Saint-Jacques-de-la-Boucherie, Parigi", coord: [2.3488, 48.8580],
+            hugo: "La torre trasformata in fabbrica di piombo per artiglieria.",
+            esito: "La chiesa fu demolita, la torre fu riscattata dal Comune e restaurata." ,
+            foto: "immagini/jacques.jpg", credito: "" },
+        { id: "saint-benoit", nome: "Saint-Benoît, Parigi", coord: [2.3440, 48.8490],
+            hugo: "Nella navata profanata si inserisce un teatro. Obbrobrio!",
+            esito: "Demolita a metà Ottocento (da verificare)." },
+        { id: "reims", nome: "Cattedrale di Reims", coord: [4.0340, 49.2538],
+            hugo: "Si scalpellano le sculture per paura che cadano pietre sul re.",
+            esito: "Danneggiata nel 1914, ricostruita nel Novecento." },
+        { id: "fecamp", nome: "Fécamp, il jubé", coord: [0.3730, 49.7586],
+            hugo: "Il curato demolisce il jubé; con i pezzi si fa una villetta.",
+            esito: "Da verificare." },
+        { id: "saint-bertin", nome: "Saint-Bertin", coord: [2.2610, 50.7490],
+            hugo: "Un prefetto fa abbattere tre quarti delle magnifiche rovine con la scusa di dare lavoro agli operai. L'alternativa ironica di Hugo: due squadre, ciascuna scava una buca e riempie quella dell'altra. Meglio l'inutile del dannoso.",
+            foto: "immagini/bertin.jpg", credito: "" },
+    ];
+    /* ===== ANNI: i sei già presenti sono del 1832, qui aggiungo quelli del 1825 ===== */
+    const ANNO = new URLSearchParams(location.search).get('anno') === '1825' ? 1825 : 1832;
+    for (const m of monumenti) m.anno = 1832;
+
+    monumenti.push(
+        { anno: 1825, id: "blois-castello", nome: "Blois, Castello degli Stati", coord: [1.3359, 47.5929], offset: [-11, 0],
+            hugo: "Il castello viene usato come caserma.",
+            foto: "immagini/blois.jpg"},
+        { anno: 1825, id: "blois-torre", nome: "Blois, torre ottagonale di Caterina de' Medici", coord: [1.3359, 47.5929], offset: [11, 0],
+            hugo: "La bella torre ottagonale sta crollando, sepolta sotto la struttura di un quartier generale di cavalleria.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "orleans", nome: "Orléans, le mura di Giovanna d'Arco", coord: [1.9093, 47.9029],
+            hugo: "Gli ultimi resti delle mura difese da Giovanna d'Arco sono scomparsi da poco.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "sorbona", nome: "Abbazia della Sorbona, Parigi", coord: [2.3432, 48.8487],
+            hugo: "Un edificio elegante e riccamente decorato sta cadendo, in questo momento, sotto i colpi di martello.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "autun", nome: "Cattedrale di Autun", coord: [4.2987, 46.9487],
+            hugo: "Anche la cattedrale gotica subisce lo stesso oltraggio di Saint-Sulpice: un restauro che la ricopre di intonaco.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "mauriac", nome: "Chiesa di Mauriac", coord: [2.3322, 45.2183],
+            hugo: "L'antica chiesa è stata distrutta. Nient'altro: è semplicemente sparita.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "soissons", nome: "Soissons, chiostro di Saint-Jean", coord: [3.3355, 49.3814],
+            hugo: "Si lascia crollare il ricco chiostro con le sue due guglie, leggere e ardite. Tra le rovine, il tagliapietre sceglie i materiali.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "braisnes", nome: "Chiesa di Braisnes", coord: [3.5263, 49.3433],
+            hugo: "La chiesa è stata smantellata: senza più la volta, la pioggia cade sulle dieci tombe reali che custodisce.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "belle-arti", nome: "Scuola di Belle Arti, Parigi", coord: [2.3350, 48.8566],
+            hugo: "Capolavori antichi, ridotti a materiale di cantiere.",
+            riuso: {
+                elementi: [
+                    { nome: "La scalinata del Trecento",
+                        opera: "Una scalinata di legno, scolpita da meravigliosi artisti del XIV secolo.",
+                        uso: "Oggi serve da scala ai muratori.",
+                        iconaOpera: "🏛️", iconaUso: "🪜", foto: null, fotoUso: null },
+                    { nome: "Le carpenterie del Rinascimento",
+                        opera: "Lavori in legno ammirevoli, alcuni ancora dipinti, dorati e decorati con stemmi.",
+                        uso: "Ammucchiati in pezzi, sparsi per terra, nelle soffitte e nei sottotetti.",
+                        iconaOpera: "🛡️", iconaUso: "🪵", foto: null, fotoUso: null },
+                    { nome: "Le porte e i rivestimenti di Anet",
+                        opera: "Porte e pannelli lavorati con lo scalpello più delicato, quello del castello di Anet.",
+                        uso: "Finiti fino all'anticamera dell'ufficio dell'architetto della Scuola, che ci cammina sopra ogni giorno senza accorgersene.",
+                        iconaOpera: "🚪", iconaUso: "👞", foto: null, fotoUso: null }
+                ],
+                finale: "E intanto andiamo a cercare lontano, e a pagare caro, gli ornamenti per i nostri musei."
+            } },
+        { anno: 1825, id: "brou", nome: "Chiesa di Brou, Bourg-en-Bresse", coord: [5.2446, 46.1946],
+            hugo: "Costò ventiquattro milioni. Per abbatterla bastano tre giorni e trecento franchi.",
+            scena: {
+                immagine: null, oggi: null,
+                intro: "Per costruirla servirono ventiquattro milioni. Quanto costa abbatterla?",
+                strumenti: [
+                    { icona: "🔨", nome: "Abbatti (300 franchi)", abbatte: true,
+                        risposta: "Tre giorni e trecento franchi. Fatto." }
+                ],
+                finale: "Ricostruirla? Impossibile: oggi servirebbero più di centocinquanta milioni, e il genio di quei secoli non c'è più. L'industria ha preso il posto dell'arte."
+            } },
+        { anno: 1825, id: "saint-germain-des-pres", nome: "Saint-Germain-des-Prés, Parigi", coord: [2.3338, 48.8539], offset: [-14, 0],
+            hugo: "Delle tre guglie, due minacciano di cadere: puntellarle o abbatterle? Si è scelto di abbatterle.",
+            scena: {
+                immagine: null, oggi: null,
+                zona: { x0: .15, y0: 0, x1: .85, y1: .4 },   // la parte che cade: le guglie
+                intro: "Due guglie minacciano di cadere. Cosa si fa?",
+                strumenti: [
+                    { icona: "🪵", nome: "Puntellare", risposta: "Fondi insufficienti. Non ci sono soldi per puntellarle." },
+                    { icona: "🔨", nome: "Abbattere", abbatte: true, risposta: "Si è trovato più spiccio abbatterle." }
+                ],
+                finale: "Da qui Enrico IV aveva osservato Parigi. Cadono solo le guglie, ma il volto della chiesa è cambiato per sempre."
+            } },
+        { anno: 1825, id: "lione", nome: "Cattedrale di Lione", coord: [4.8270, 45.7600], offset: [-12, 0],
+            hugo: "Una coltre di tempera rosa copre il colore che i secoli avevano dato alla cattedrale.",
+            scena: {
+                immagine: null, oggi: null,
+                intro: "La cattedrale ha bisogno di restauro.",
+                strumenti: [
+                    { icona: "🧱", nome: "Lascia com'è", risposta: "Non è previsto. I lavori sono già stati affidati." },
+                    { icona: "🖌️", nome: "Restaura", vernice: true,
+                        risposta: "Una coltre di tempera rosa copre il bel colore che i secoli avevano dato alla pietra." }
+                ],
+                finale: "Il restauro cancella proprio ciò che dovrebbe proteggere. E non si torna indietro."
+            } },
+        { anno: 1825, id: "arbresle", nome: "Castello dell'Arbresle, vicino a Lione", coord: [4.6122, 45.8355], offset: [12, 0],
+            hugo: "Il celebre castello è stato demolito. Si è salvata una sola torre, ma solo perché il proprietario la affitta al Comune come prigione.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "charite", nome: "La Charité-sur-Loire", coord: [3.0126, 47.1795],
+            hugo: "Una chiesa romanica immensa e ricchissima, che rivaleggerebbe con le cattedrali più celebri d'Europa. È mezza rovinata, e cade pietra a pietra.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "chambord", nome: "Castello di Chambord", coord: [1.5170, 47.6162],
+            hugo: "L'Alhambra di Francia vacilla già: l'acqua filtra attraverso la pietra tenera dei tetti senza più piombo. Hugo teme che la sottoscrizione nazionale per salvarlo sia inutile.",
+            foto: null, credito: "" },
+        { anno: 1825, id: "jumieges", nome: "Abbazia di Jumièges", coord: [0.8175, 49.4339],
+            hugo: "Degli inglesi hanno comprato per trecento franchi il diritto di imballare ciò che vogliono delle rovine. La Francia spende fortune per comprare opere all'estero, e intanto svende le proprie.",
+            foto: null, credito: "" }
+    );
+
+    const visibili = monumenti.filter(m => m.anno === ANNO);
+
+    // La pagina conserva ?anno=... quando la scheda viene chiusa
+    const _rs = history.replaceState.bind(history);
+    history.replaceState = (s, t, u) =>
+        _rs(s, t, u === location.pathname ? location.pathname + location.search : u);
+
+    // Titolo con l'anno e pulsante per tornare alla scelta
+    document.querySelector('#titolo small').textContent = 'Victor Hugo, ' + ANNO;
+    document.body.insertAdjacentHTML('beforeend',
+        '<a href="index.html" style="position:absolute;top:14px;right:14px;z-index:2;' +
+        'background:#fffdf8;padding:8px 14px;border-radius:6px;text-decoration:none;color:#2b2b2b;' +
+        'font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,.2)">← Cambia anno</a>');
+
+    /* =========================================================
+       2. MAPPA
+       ========================================================= */
+    const VISTA = [[-5.5, 41.0], [9.8, 51.6]];
+
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://tiles.openfreemap.org/styles/positron',
+        bounds: VISTA,
+        fitBoundsOptions: { padding: 20 },
+        minZoom: 4.6,
+        maxZoom: 7,
+        maxBounds: [[-14, 37], [20, 56]],
+        dragRotate: false,
+        pitchWithRotate: false,
+        attributionControl: { compact: true }
+    });
+    map.touchZoomRotate.disableRotation();
+
+    const scheda = document.getElementById('scheda');
+    const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 14 });
+
+    map.on('load', () => {
+        const terrestre = ['all',
+            ['==', ['get', 'admin_level'], 2],
+            ['!=', ['coalesce', ['get', 'maritime'], 0], 1]];
+        const conFrancia = ['any',
+            ['==', ['get', 'adm0_l'], 'France'], ['==', ['get', 'adm0_r'], 'France'],
+            ['==', ['get', 'adm0_l'], 'FR'],     ['==', ['get', 'adm0_r'], 'FR']];
+        map.addLayer({
+            id: 'francia-bordo', type: 'line',
+            source: 'openmaptiles', 'source-layer': 'boundary',
+            filter: ['all', terrestre, conFrancia],
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#5c4b36', 'line-width': 2.2 }
+        });
+
+        visibili.forEach(m => {
+            const speciale = !!(m.scena || m.riuso || m.dettaglio);
+            const el = document.createElement('div');
+            el.style.cssText = speciale
+                ? 'width:24px;height:24px;border-radius:50%;background:#c0392b;border:3px solid #fff;cursor:pointer;'
+                : 'width:16px;height:16px;border-radius:50%;background:#c0392b;border:2px solid #fff;cursor:pointer;box-shadow:0 0 5px rgba(0,0,0,.5)';
+            if (speciale) el.classList.add('pulsa');
+            el.addEventListener('mouseenter', () => {
+                popup.setLngLat(m.coord)
+                    .setHTML(`<b>${m.nome}</b><i>${m.hugo}</i>` + (speciale ? '<br><small>▶ Clicca per esplorare</small>' : ''))
+                    .addTo(map);
+            });
+            el.addEventListener('mouseleave', () => popup.remove());
+            el.addEventListener('click', () => apri(m));
+            new maplibregl.Marker({ element: el, offset: m.offset || [0, 0] }).setLngLat(m.coord).addTo(map);
+        });
+
+        const dalLink = visibili.find(m => m.id === location.hash.slice(1));
+        if (dalLink) apri(dalLink);
+    });
+
+    function apri(m) {
+        popup.remove();
+        location.hash = m.id;
+        if (m.scena) { apriScena(m); return; }
+        if (m.riuso) { apriRiuso(m); return; }
+        map.easeTo({ center: m.coord, zoom: Math.max(map.getZoom(), 6), duration: 1000 });
+        const foto = m.foto
+            ? `<img class="foto" src="${m.foto}" alt="${m.nome}">`
+            : `<div class="foto vuota">Foto da inserire</div>`;
+        const credito = m.credito ? `<div class="credito">${m.credito}</div>` : '';
+        scheda.style.display = 'block';
+        scheda.innerHTML =
+            `${foto}${credito}
+     <h2>${m.nome}</h2>
+     <p class="hugo">${m.hugo}</p>
+     ${m.esito ? `<p class="esito">${m.esito}</p>` : ''}
+     <button onclick="chiudi()">← Tutta la Francia</button>`;
+    }
+
+    function chiudi() {
+        scheda.style.display = 'none';
+        map.fitBounds(VISTA, { padding: 20, duration: 1000 });
+        history.replaceState(null, '', location.pathname);
+    }
+
+    /* =========================================================
+       3. SCENA DI DEMOLIZIONE
+       ========================================================= */
+    const COLONNE = 8, RIGHE = 10;   // più alti = più frammenti
+    const $ = id => document.getElementById(id);
+    let corrente = null, finito = false;
+
+    // Immagini segnaposto, disegnate nel codice (da sostituire con le tue)
+    function svgUrl(svg) { return 'url("data:image/svg+xml;utf8,' + encodeURIComponent(svg) + '")'; }
+
+    const SEGNAPOSTO_TORRE = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" preserveAspectRatio="none">
+  <defs><linearGradient id="c" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#9fb6c4"/><stop offset="1" stop-color="#e8e2d0"/></linearGradient></defs>
+  <rect width="400" height="500" fill="url(#c)"/>
+  <ellipse cx="200" cy="500" rx="320" ry="90" fill="#7d8f5c"/>
+  <rect x="130" y="110" width="140" height="350" fill="#a89b86"/>
+  <rect x="120" y="85" width="26" height="30" fill="#a89b86"/><rect x="157" y="85" width="26" height="30" fill="#a89b86"/>
+  <rect x="194" y="85" width="26" height="30" fill="#a89b86"/><rect x="231" y="85" width="26" height="30" fill="#a89b86"/>
+  <rect x="120" y="108" width="160" height="12" fill="#8c806c"/>
+  <g stroke="#8c806c" stroke-width="2">
+    <line x1="130" y1="170" x2="270" y2="170"/><line x1="130" y1="230" x2="270" y2="230"/>
+    <line x1="130" y1="290" x2="270" y2="290"/><line x1="130" y1="350" x2="270" y2="350"/>
+    <line x1="130" y1="410" x2="270" y2="410"/></g>
+  <path d="M186 460 v-48 a14 14 0 0 1 28 0 v48z" fill="#3d3128"/>
+  <rect x="190" y="150" width="20" height="40" rx="10" fill="#3d3128"/>
+  <rect x="190" y="260" width="20" height="40" rx="10" fill="#3d3128"/>
+  <text x="200" y="40" text-anchor="middle" font-family="Georgia" font-size="16" fill="#555">segnaposto: sostituisci con la tua immagine</text>
+</svg>`);
+
+    const SEGNAPOSTO_OGGI = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" preserveAspectRatio="none">
+  <defs><linearGradient id="c" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#b8cdd8"/><stop offset="1" stop-color="#efe9d8"/></linearGradient></defs>
+  <rect width="400" height="500" fill="url(#c)"/>
+  <ellipse cx="200" cy="500" rx="320" ry="90" fill="#7d8f5c"/>
+  <text x="200" y="300" text-anchor="middle" font-family="Georgia" font-size="22" fill="#4a5a35">Oggi: un posto vuoto</text>
+  <text x="200" y="326" text-anchor="middle" font-family="Georgia" font-size="13" fill="#4a5a35">(sostituisci con una foto attuale)</text>
+</svg>`);
+
+    function sfondo(src, segnaposto) { return src ? `url("${src}")` : segnaposto; }
+
+    function apriScena(m) {
+        corrente = m;
+        const s = m.scena;
+        $('s-nome').textContent = m.nome;
+        $('s-hugo').textContent = m.hugo;
+        $('scena').classList.add('aperta');
+        prepara();
+    }
+
+    function prepara() {
+        const s = corrente.scena;
+        finito = false;
+        $('stage').querySelectorAll('.pezzo').forEach(p => p.remove());
+        $('oggi').style.backgroundImage = sfondo(s.oggi, SEGNAPOSTO_OGGI);
+        const integra = $('integra');
+        integra.style.display = 'block';
+        integra.style.clipPath = '';
+        integra.style.backgroundImage = sfondo(s.immagine, SEGNAPOSTO_TORRE);
+        $('messaggio').textContent = s.intro || "Scegli come abbattere l'edificio.";
+        $('finale').style.display = 'none';
+
+        const box = $('strumenti');
+        box.innerHTML = '';
+        s.strumenti.forEach(t => {
+            const b = document.createElement('button');
+            b.textContent = `${t.icona} ${t.nome}`;
+            if (t.abbatte) b.classList.add('penna');
+            b.addEventListener('click', () => usa(t, b));
+            box.appendChild(b);
+        });
+    }
+
+    /* ===== EFFETTI (stili aggiunti da qui, non serve toccare il CSS) ===== */
+    (function () {
+        const st = document.createElement('style');
+        st.textContent = `
+    .polvere { position:absolute; border-radius:50%; pointer-events:none;
+      background:radial-gradient(circle, rgba(190,180,165,.9), rgba(190,180,165,0) 70%); }
+    .detrito { position:absolute; pointer-events:none; background:#6f6455; }
+    .flash { position:absolute; left:0; top:0; width:100%; height:100%; background:#fff; opacity:0; pointer-events:none; }
+    #crepe { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; }
+    #stage.scuoti { animation: scossa .9s linear; }
+    @keyframes scossa {
+      0%,100% { transform:translate(0,0); }
+      10% { transform:translate(-5px,3px); } 20% { transform:translate(6px,-4px); }
+      30% { transform:translate(-7px,2px); } 40% { transform:translate(5px,4px); }
+      50% { transform:translate(-4px,-3px); } 60% { transform:translate(4px,2px); }
+      70% { transform:translate(-3px,3px); } 85% { transform:translate(2px,-1px); }
+    }`;
+        document.head.appendChild(st);
+    })();
+
+    function nuvola(x, y, s, ritardo) {
+        const p = document.createElement('div');
+        p.className = 'polvere pezzo';
+        p.style.cssText = `left:${x - s / 2}px; top:${y - s / 2}px; width:${s}px; height:${s}px; opacity:0;`;
+        $('stage').appendChild(p);
+        const dx = (Math.random() - .5) * 60;
+        p.animate([
+            { opacity: 0, transform: 'scale(.3)' },
+            { opacity: .85, offset: .25 },
+            { opacity: 0, transform: `translate(${dx}px,-50px) scale(1.9)` }
+        ], { duration: 1800 + Math.random() * 800, delay: ritardo || 0, easing: 'ease-out', fill: 'both' })
+            .onfinish = () => p.remove();
+    }
+
+    function polvere(n, forte) {
+        const W = $('stage').clientWidth, H = $('stage').clientHeight;
+        for (let i = 0; i < n; i++) {
+            const s = (forte ? 90 : 50) + Math.random() * (forte ? 90 : 50);
+            const x = W * (.15 + Math.random() * .7);
+            const y = H * (forte ? .6 + Math.random() * .3 : .2 + Math.random() * .5);
+            nuvola(x, y, s, Math.random() * 400);
+        }
+    }
+
+    function detriti(n) {
+        const stage = $('stage'), W = stage.clientWidth, H = stage.clientHeight;
+        for (let i = 0; i < n; i++) {
+            const d = document.createElement('div');
+            d.className = 'detrito pezzo';
+            const s = 3 + Math.random() * 6;
+            const x = W * (.28 + Math.random() * .44), y = H * (.15 + Math.random() * .5);
+            d.style.cssText = `left:${x}px; top:${y}px; width:${s}px; height:${s}px;`;
+            stage.appendChild(d);
+            d.animate([
+                { transform: 'translate(0,0) rotate(0deg)', opacity: 1 },
+                { transform: `translate(${(Math.random() - .5) * 50}px,${H - y - 10}px) rotate(${Math.random() * 360}deg)`, opacity: .8 }
+            ], { duration: 500 + Math.random() * 500, easing: 'cubic-bezier(.5,0,1,.7)', fill: 'forwards' })
+                .onfinish = () => d.remove();
+        }
+    }
+
+    function lampo() {
+        const f = document.createElement('div');
+        f.className = 'flash pezzo';
+        $('stage').appendChild(f);
+        f.animate([{ opacity: 0 }, { opacity: .95, offset: .1 }, { opacity: 0, offset: .3 },
+            { opacity: .7, offset: .4 }, { opacity: 0 }], { duration: 650 })
+            .onfinish = () => f.remove();
+    }
+
+    function crepa(livello) {
+        const stage = $('stage'), integra = $('integra');
+        let cv = $('crepe');
+        if (!cv) {
+            cv = document.createElement('canvas');
+            cv.id = 'crepe'; cv.className = 'pezzo';
+            cv.width = stage.clientWidth; cv.height = stage.clientHeight;
+            integra.appendChild(cv);
+        }
+        const g = cv.getContext('2d'), W = cv.width, H = cv.height;
+        for (let i = 0; i < 2 + livello; i++) {
+            let x = W * (.3 + Math.random() * .4), y = H * (.15 + Math.random() * .6);
+            let ang = Math.random() * Math.PI * 2;
+            g.beginPath(); g.moveTo(x, y);
+            const passi = 6 + Math.floor(Math.random() * 6);
+            for (let k = 0; k < passi; k++) {
+                ang += (Math.random() - .5) * 1.1;
+                const len = 10 + Math.random() * 22;
+                x += Math.cos(ang) * len; y += Math.sin(ang) * len;
+                g.lineTo(x, y);
+            }
+            g.strokeStyle = 'rgba(30,22,15,.85)'; g.lineWidth = 1.6; g.stroke();
+            g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = .7; g.stroke();
+        }
+    }
+
+    function usa(t, bottone) {
+        if (finito) return;
+        $('messaggio').textContent = t.risposta;
+        if (t.abbatte || t.vernice) {
+            finito = true;
+            document.querySelectorAll('#strumenti button').forEach(b => b.disabled = true);
+            if (t.vernice) vernicia(); else crolla();
+            return;
+        }
+        bottone.disabled = true;
+        const integra = $('integra');
+        integra.classList.remove('trema');
+        void integra.offsetWidth;
+        integra.classList.add('trema');
+        if (t.nome.indexOf('Fuoco') === 0) lampo();
+    }
+    function macerie() {
+        const stage = $('stage'), W = stage.clientWidth, H = stage.clientHeight;
+        const colori = ['#8c806c', '#6f6455', '#a89b86', '#5a5044', '#b3a791'];
+        for (let i = 0; i < 45; i++) {
+            const s = 6 + Math.random() * 16;
+            // più fitte al centro, dove sorgeva la torre
+            const x = W * (.5 + (Math.random() + Math.random() + Math.random() - 1.5) * .55) - s / 2;
+            const y = H - 75 + Math.random() * 60;
+            const el = document.createElement('div');
+            el.className = 'pezzo';
+            const poly = Array.from({ length: 5 }, () =>
+                `${Math.round(Math.random() * 100)}% ${Math.round(Math.random() * 100)}%`).join(',');
+            el.style.cssText =
+                `left:${x}px; top:${y}px; width:${s}px; height:${s * (.6 + Math.random() * .5)}px;` +
+                `background:${colori[Math.floor(Math.random() * colori.length)]};` +
+                `clip-path:polygon(${poly}); opacity:0;`;
+            stage.appendChild(el);
+            el.animate(
+                [{ opacity: 0, transform: `translateY(-${20 + Math.random() * 40}px) scale(.5)` },
+                    { opacity: 1, transform: 'translateY(0) scale(1)' }],
+                { duration: 500 + Math.random() * 500, delay: Math.random() * 400, easing: 'ease-in', fill: 'forwards' });
+        }
+    }
+    function vernicia() {
+        const stage = $('stage');
+        const v = document.createElement('div');
+        v.className = 'pezzo';
+        v.style.cssText = 'left:0;top:0;width:100%;height:100%;background:rgba(226,120,150,.75);' +
+            'mix-blend-mode:multiply;clip-path:inset(0 0 100% 0);';
+        stage.appendChild(v);
+        v.animate([{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0% 0)' }],
+            { duration: 3000, easing: 'ease-in-out', fill: 'forwards' });
+        setTimeout(() => { if (stage.contains(v)) mostraFinale(); }, 3600);
+    }
+    function crolla() {
+        const stage = $('stage'), integra = $('integra');
+        const img = integra.style.backgroundImage;
+        const W = stage.clientWidth, H = stage.clientHeight;
+        const z = corrente.scena.zona;                      // opzionale: cade solo questa parte
+        const X0 = z ? z.x0 * W : 0, X1 = z ? z.x1 * W : W;
+        const Y0 = z ? z.y0 * H : 0, Y1 = z ? z.y1 * H : H;
+        const NC = z ? 5 : 7, NR = z ? 5 : 9;
+
+        const pt = [];
+        for (let r = 0; r <= NR; r++) {
+            pt[r] = [];
+            for (let c = 0; c <= NC; c++) {
+                let x = X0 + c * (X1 - X0) / NC, y = Y0 + r * (Y1 - Y0) / NR;
+                if (c > 0 && c < NC) x += (Math.random() - .5) * (X1 - X0) / NC * .7;
+                if (r > 0 && r < NR) y += (Math.random() - .5) * (Y1 - Y0) / NR * .7;
+                pt[r][c] = [x, y];
+            }
+        }
+
+        const pezzi = [];
+        function crea(tri) {
+            const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
+            const cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+            const poly = tri.map(p => `${cx + (p[0] - cx) * 1.03}px ${cy + (p[1] - cy) * 1.03}px`).join(',');
+            const el = document.createElement('div');
+            el.className = 'pezzo';
+            el.style.cssText =
+                `left:0; top:0; width:100%; height:100%; background-image:${img}; background-size:100% 100%;` +
+                `clip-path:polygon(${poly}); transform-origin:${cx}px ${cy}px;`;
+            stage.appendChild(el);
+            pezzi.push({
+                el, cx, cy, x: 0, y: 0, rot: 0, fermo: false,
+                vx: (Math.random() - .5) * 3, vy: Math.random() * 1.5, vr: (Math.random() - .5) * 6,
+                ritardo: (1 - cy / H) * 700 + Math.random() * 350,
+                pavimento: Math.max(cy, H - 30 - Math.random() * 45)
+            });
+        }
+        for (let r = 0; r < NR; r++) {
+            for (let c = 0; c < NC; c++) {
+                const a = pt[r][c], b = pt[r][c + 1], d = pt[r + 1][c + 1], e = pt[r + 1][c];
+                if (Math.random() < .5) { crea([a, b, d]); crea([a, d, e]); }
+                else { crea([a, b, e]); crea([b, d, e]); }
+            }
+        }
+
+        if (z) {
+            // l'immagine resta, con un "buco" dove stava la parte che cade
+            const q = n => (n * 100) + '%';
+            integra.style.clipPath = `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ` +
+                `${q(z.x0)} ${q(z.y0)}, ${q(z.x1)} ${q(z.y0)}, ${q(z.x1)} ${q(z.y1)}, ${q(z.x0)} ${q(z.y1)}, ${q(z.x0)} ${q(z.y0)})`;
+        } else {
+            integra.style.display = 'none';
+        }
+
+        stage.classList.add('scuoti');
+        setTimeout(() => stage.classList.remove('scuoti'), 1000);
+        polvere(10, true);
+
+        const t0 = performance.now();
+        let ultimo = t0;
+        function passo(now) {
+            if (!stage.contains(pezzi[0].el)) return;
+            const dt = Math.min(32, now - ultimo) / 16.67; ultimo = now;
+            let attivi = 0;
+            pezzi.forEach(o => {
+                if (now - t0 < o.ritardo) { attivi++; return; }
+                if (o.fermo) return;
+                attivi++;
+                o.vy += .55 * dt; o.x += o.vx * dt; o.y += o.vy * dt; o.rot += o.vr * dt;
+                if (o.cy + o.y >= o.pavimento) {
+                    o.y = o.pavimento - o.cy;
+                    if (o.vy > 6 && Math.random() < .3) nuvola(o.cx + o.x, o.pavimento, 40 + Math.random() * 40, 0);
+                    if (o.vy > 3) { o.vy *= -.3; o.vx *= .5; o.vr *= .5; } else { o.fermo = true; }
+                }
+                o.el.style.transform = `translate(${o.x}px,${o.y}px) rotate(${o.rot}deg)`;
+            });
+            if (attivi) requestAnimationFrame(passo); else fine();
+        }
+        function fine() {
+            if (!stage.contains(pezzi[0].el)) return;
+            polvere(6, true);
+            setTimeout(() => {
+                pezzi.forEach(o => {
+                    o.el.style.transition = 'opacity 1.2s, transform 1.2s';
+                    if (Math.random() < .3) {
+                        o.el.style.transform = `translate(${o.x}px,${o.y}px) rotate(${o.rot}deg) scale(.4)`;
+                    } else {
+                        o.el.style.opacity = '0';
+                    }
+                });
+                macerie();
+            }, 500);
+            setTimeout(() => { if (stage.contains(pezzi[0].el)) mostraFinale(); }, 1900);
+        }
+        requestAnimationFrame(passo);
+    }
+
+    function mostraFinale() {
+        const f = $('finale'), s = corrente.scena;
+        f.innerHTML =
+            `<div>${s.finale}</div>` +
+            (corrente.esito ? `<div style="margin-top:6px"><b>Esito storico:</b> ${corrente.esito}</div>` : '') +
+            `<button onclick="prepara()">↺ Ricomincia</button>`;
+        f.style.display = 'block';
+    }
+    /* ===== SCENA "RIUSO": com'era -> cos'è diventato ===== */
+    function faccia(cls, foto, icona) {
+        return `<div class="r-faccia ${cls}"` + (foto ? ` style="background-image:url('${foto}')"` : '') + `>${foto ? '' : icona}</div>`;
+    }
+
+    function apriRiuso(m) {
+        const els = m.riuso.elementi;
+        $('r-nome').textContent = m.nome;
+        $('r-hugo').textContent = m.hugo;
+        $('r-finale').style.display = 'none';
+        $('r-finale').innerHTML = '';
+        $('r-carte').innerHTML = els.map((o, i) => `
+    <div class="r-carta" data-i="${i}">
+      <div class="r-img">${faccia('r-opera', o.foto, o.iconaOpera)}${faccia('r-uso', o.fotoUso, o.iconaUso)}</div>
+      <div class="r-testo">
+        <div class="r-stato"><span class="prima">Com'era</span><span class="dopo">Oggi</span></div>
+        <div class="r-nome">${o.nome}</div>
+        <div class="prima">${o.opera}</div>
+        <div class="dopo">${o.uso}</div>
+        <div class="r-hint">Tocca per vedere cosa è diventato →</div>
+      </div>
+    </div>`).join('');
+        document.querySelectorAll('.r-carta').forEach(c => c.addEventListener('click', () => {
+            c.classList.add('fatta');
+            if (document.querySelectorAll('.r-carta.fatta').length === els.length) {
+                const f = $('r-finale');
+                f.innerHTML = `${m.riuso.finale}<div style="margin-top:8px;font-style:normal"><button id="r-reset" style="padding:6px 10px;cursor:pointer">↺ Rimetti tutto com'era</button></div>`;
+                f.style.display = 'block';
+                $('r-reset').addEventListener('click', () => apriRiuso(m));
+            }
+        }));
+        $('riuso').classList.add('aperto');
+    }
+
+    function chiudiRiuso() {
+        $('riuso').classList.remove('aperto');
+        history.replaceState(null, '', location.pathname);
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        $('r-x').addEventListener('click', chiudiRiuso);
+        $('riuso').addEventListener('click', e => { if (e.target.id === 'riuso') chiudiRiuso(); });
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') chiudiRiuso(); });
+
+    function chiudiScena() {
+        $('scena').classList.remove('aperta');
+        history.replaceState(null, '', location.pathname);
+    }
+    $('x').addEventListener('click', chiudiScena);
+    $('scena').addEventListener('click', e => { if (e.target.id === 'scena') chiudiScena(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') chiudiScena(); });
+</script>
+</body>
+</html>
